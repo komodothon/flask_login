@@ -1,0 +1,18 @@
+{% extends "layout.html" %}
+
+{% block content %}
+
+    <h2>Flask-Login demo</h2>
+    {% if user.is_authenticated %}
+
+        <p>
+            Welcome, {{ user.id }}! <a href="{{ url_for('dashboard') }}">Go to dashboard</a> |
+            <a href="{{ url_for('logout') }}">Logout</a>
+        </p>
+
+    {% else %}
+        <p>You are not logged in.
+            <a href="{{ url_for('login') }}">Login here</a>
+        </p>
+    {% endif %}
+{% endblock %}
