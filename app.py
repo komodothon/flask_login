@@ -1,9 +1,13 @@
 # demo of flask-login
 
-from flask import Flask, render_template, redirect, url_for, request, flash
+from flask import Flask, render_template, redirect, url_for, request, flash, g
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
+from os.path import join
+import sqlite3
 import uuid
+
+DATABASE = join('instance', 'users.db')
 
 app = Flask(__name__)
 app.secret_key = "app_secret_key"
@@ -13,28 +17,52 @@ login_manager.init_app(app)
 login_manager.login_view = "login"
 bcrypt = Bcrypt(app)
 
-users = {} # {uuid4:user object}
+# database helper functions
+def get_db_connection():
+    if 'db' not in g:
+        g.db = sqlite3.connect(DATABASE)
+    return g.db
+
+def add_user(prepped_user_data):
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("INSERT INTO users (id, username, email, password_hash) VALUES (?, ?, ?, ?)", prepped_user_data)
+    connection.commit()
+
+@app.teardown_appcontext
+def close_db(error):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 # user model with password hashing
 class User(UserMixin):
-    def __init__(self, username, password):
-        self.id = str(uuid.uuid4())
+    def __init__(self, id, username, email, password_hash):
+        self.id = id
         self.username = username
-        self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
+        self.email = email
+        self.password_hash = password_hash
+
+    @staticmethod
+    def get(user_id):
+        connection = get_db_connection()
+        cursor = connection.cursor()
+        cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        user_data = cursor.fetchone()
+        return User(*user_data) if user_data else None # * used for unpacking into a tuple, whatever is inside
+        
+    @staticmethod
+    def get_by_username(username):
+        connection = get_db_connection()
+        cursor = connection.cursor()
+        cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+        user_data = cursor.fetchone()
+        return User(*user_data) if user_data else None
 
     def verify_password(self, password):
         return bcrypt.check_password_hash(self.password_hash, password)
     
-    @staticmethod
-    def get(user_id):
-        return users.get(user_id)
-
-    @staticmethod
-    def get_by_username(username):
-        for user in users.values():
-            if user.username == username:
-                return user
-            return None
 
 # Flask login user loader
 @login_manager.user_loader
@@ -51,15 +79,19 @@ def home():
 def register():
     if request.method == "POST":
         username = request.form.get('username')
+        email = request.form.get('email')
         password = request.form.get('password')
 
         if User.get_by_username(username):
             flash('Username already exists. Please choose another one.', 'danger')
             return redirect(url_for('register'))
 
-        new_user = User(username, password)
-        users[new_user.id] = new_user
-        # print(users)
+        id = str(uuid.uuid4())
+        password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
+        new_user = User(id, username, email, password_hash)
+        prepped_user_data = (id, username, email, password_hash)
+        add_user(prepped_user_data)
+
         flash('Registration successful! Please log in.', 'success')
         return redirect(url_for('login'))
     
